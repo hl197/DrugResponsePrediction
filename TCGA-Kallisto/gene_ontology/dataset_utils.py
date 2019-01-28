@@ -4,6 +4,12 @@ import random
 
 
 def oversample(df, x=2):
+    """
+    Oversamples the minority class (examples with no drug response label).
+    :param df: Input dataframe
+    :param x: Factor to oversample by
+    :return: Oversampled dataframe
+    """
     new_df = pd.DataFrame(columns=df.columns)
     i, j = 0, 0
     while i < df.shape[0]:
@@ -17,9 +23,16 @@ def oversample(df, x=2):
     return new_df
 
 
-def divide_data(csv, numpy=False, seed=17):
+def divide_data(filename, numpy=False, seed=17):
+    """
+    Divides the data in the specified csv file into 80% training, 10% validation, and 10% testing.
+    :param filename: name of csv file.
+    :param numpy: whether the ouput should be returned as a numpy array.
+    :param seed: seed for random to replicate results
+    :return: train, validation, and testing dataframes / numpy arrays
+    """
     random.seed(seed)
-    df = pd.read_csv(csv)
+    df = pd.read_csv(filename)
     df = df.fillna(0)
     # divides data into 80% training, 10% validation, 10% testing
     n_examples = df.shape[0]
