@@ -16,14 +16,16 @@ removeConstantCols <- function (A) {
 ###############
 # load gene and transcript annotation details: toil.genes, toil.transcripts
 load("Gencode.v23.annotation.RData") 
-tcga.genes <- rownames(toil.genes)
+tcga.genes <- toil.genes$Symbol
 
 # load gene and transcript annotation details: toil.genes, toil.transcripts
 tcga.samples <- read.table("tcga_sample_names", sep='\t', header=FALSE, row.names = 1)
 tcga.samples <- sapply(tcga.samples, as.character)
 TCGA.rnaseq <- as.data.frame(fread("tcga_Kallisto_tpm_genes", sep=',', header=FALSE))
 colnames(TCGA.rnaseq) <- tcga.samples
-rownames(TCGA.rnaseq) <- tcga.genes
+rownames(TCGA.rnaseq) <- make.names(tcga.genes, unique=TRUE)
+write.table(rownames(TCGA.rnaseq), file="gene_ontology/genes.txt", row.names=FALSE, col.names=FALSE, quote=FALSE)
+
 
 TCGA.rnaseq <- t(TCGA.rnaseq)
 TCGA.rnaseq <- removeNArows(TCGA.rnaseq)
@@ -118,10 +120,10 @@ apply(TCGA.labels, MARGIN = 2, function(X) table(X))
 
 TCGA.rnaseq <- scale(TCGA.rnaseq)
 dim(TCGA.rnaseq)
-included <- read.csv("gene_ontology/included_genes.csv")
-included <- names(sapply(included, levels))
-included <- included[1:length(included)-1]
-TCGA.rnaseq <- TCGA.rnaseq[,included]
+# included <- read.csv("gene_ontology/included_genes.csv")
+# included <- names(sapply(included, levels))
+# included <- included[1:length(included)-1]
+# TCGA.rnaseq <- TCGA.rnaseq[,included]
 
 #included <- as.numeric(read.csv("gene_ontology/included_genes.csv", header = FALSE))
 #TCGA.included <- TCGA.rnaseq[,included]
@@ -144,4 +146,4 @@ TCGA.all <- merge(TCGA.rnaseq, TCGA.mask, by=0)
 TCGA.all <- cbind(TCGA.all, TCGA.outcomes)
 dim(TCGA.all)
 
-write.csv(TCGA.all, "rnaseq_scaled_all_drug.csv", row.names = FALSE)
+write.csv(TCGA.all, "rnaseq_scaled_symbols.csv", row.names = FALSE)
