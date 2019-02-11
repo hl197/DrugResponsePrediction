@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from sklearn.metrics import auc, confusion_matrix
 from sklearn.model_selection import KFold
+from sklearn.ensemble import VotingClassifier
 
 
 def oversample(df, label=0, x=2):
@@ -269,3 +270,4 @@ def get_gene_sets_union(gene_sets_perf, K):
         for gene in genes:
             top_union.add(gene)
     return top_union
+
