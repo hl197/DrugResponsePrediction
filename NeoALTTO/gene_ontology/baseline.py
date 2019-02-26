@@ -1,35 +1,74 @@
+from dataset_utils import *
+from collections import defaultdict
+import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import accuracy_score
-from dataset import divide_data
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
 
 
-LR = []
-RF = []
-SVM = []
-for i in range(20):
-    train, val, test = divide_data('../count_processed_rnaseq.csv', numpy=True, seed=i)
+# split_dataset("rnaseq_scaled_symbols.csv")
+#
+# gene_set_rankings("../c_rnaseq_scaled_symbols.csv", "combo_top_sets.txt")
+# gene_set_rankings("../l_rnaseq_scaled_symbols.csv", "lapatinib_top_sets.txt")
+# gene_set_rankings("../t_rnaseq_scaled_symbols.csv", "trastuzumab_top_sets.txt")
 
-    X, y = train[:, 1:-1], train[:, -1].astype(int)
-    X_test, y_test = test[:, 1:-1], test[:, -1].astype(int)
 
-    clf = LinearRegression().fit(X, y)
-    y_pred = clf.predict(X_test)
+gene_set_auc = {'c': defaultdict(float), 'l': defaultdict(float), 't': defaultdict(float)}
+gene_set_top = {'c': defaultdict(int), 'l': defaultdict(int), 't': defaultdict(int)}
+pathways = sorted(os.listdir('gene_sets'))
+for r in range(100):
+    c_svm_perf = []
+    l_svm_perf = []
+    t_svm_perf = []
 
-    LR.append(accuracy_score(y_test, (y_pred > 0.5).astype(int)))
+    c_train_sets, c_test_sets = kfold_train_test_sets('../c_rnaseq_scaled_symbols.csv')
+    l_train_sets, l_test_sets = kfold_train_test_sets('../l_rnaseq_scaled_symbols.csv')
+    t_train_sets, t_test_sets = kfold_train_test_sets('../t_rnaseq_scaled_symbols.csv')
 
-    clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=7)
-    clf.fit(X, y)
-    y_pred = clf.predict(X_test)
-    RF.append(accuracy_score(y_test, (y_pred > 0.5).astype(int)))
+    train_sets = []
+    for i in range(5):
+        train_sets.append(pd.concat([c_train_sets[i], l_train_sets[i], t_train_sets[i]]))
 
-    clf = SVC(gamma='auto')
-    clf.fit(X, y)
-    y_pred = clf.predict(X_test)
-    SVM.append(accuracy_score(y_test, (y_pred > 0.5).astype(int)))
+    for p in pathways:
+        genes = get_genes(p)
+        name = '.'.join(p.split('.')[:-1])
 
-print("LR average {}, standard dev {}".format(np.mean(LR), np.std(LR)))
-print("RF average {}, standard dev {}".format(np.mean(RF), np.std(RF)))
-print("SVM average {}, standard dev {}".format(np.mean(SVM), np.std(SVM)))
+        mean_auc = avg_auc(train_sets, c_test_sets, genes)
+        c_svm_perf.append((name, mean_auc))
+
+        mean_auc = avg_auc(train_sets, l_test_sets, genes)
+        l_svm_perf.append((name, mean_auc))
+
+        mean_auc = avg_auc(train_sets, t_test_sets, genes)
+        t_svm_perf.append((name, mean_auc))
+    c_svm_perf.sort(key=lambda x: x[1], reverse=True)
+    l_svm_perf.sort(key=lambda x: x[1], reverse=True)
+    t_svm_perf.sort(key=lambda x: x[1], reverse=True)
+
+    for i in range(len(c_svm_perf)):
+        name, perf = c_svm_perf[i][0], c_svm_perf[i][1]
+        if i < 10:
+            gene_set_top['c'][name] += 1
+        gene_set_auc['c'][name] += perf
+
+    for i in range(len(l_svm_perf)):
+        name, perf = l_svm_perf[i][0], l_svm_perf[i][1]
+        if i < 10:
+            gene_set_top['l'][name] += 1
+        gene_set_auc['l'][name] += perf
+
+    for i in range(len(t_svm_perf)):
+        name, perf = t_svm_perf[i][0], t_svm_perf[i][1]
+        if i < 10:
+            gene_set_top['t'][name] += 1
+        gene_set_auc['t'][name] += perf
+
+with open("multi_combo_top_sets.txt", "w") as f:
+    for gene_set in gene_set_auc['c']:
+        f.write("{}\t{}\t{}\n".format(gene_set, gene_set_auc['c'][gene_set], gene_set_top['c'][gene_set]/100.))
+
+with open("multi_lap_top_sets.txt", "w") as f:
+    for gene_set in gene_set_auc['l']:
+        f.write("{}\t{}\t{}\n".format(gene_set, gene_set_auc['l'][gene_set], gene_set_top['l'][gene_set]/100.))
+
+with open("multi_trast_top_sets.txt", "w") as f:
+    for gene_set in gene_set_auc['t']:
+        f.write("{}\t{}\t{}\n".format(gene_set, gene_set_auc['t'][gene_set], gene_set_top['t'][gene_set]/100.))
