@@ -2,11 +2,12 @@ import pandas as pd
 import numpy as np
 import random
 import itertools
+import os
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from sklearn.metrics import auc, confusion_matrix
-from sklearn.model_selection import KFold
-from sklearn.ensemble import VotingClassifier
+from sklearn.metrics import auc, confusion_matrix, roc_curve
+from sklearn.model_selection import StratifiedKFold
+from sklearn.svm import SVC
 
 
 def oversample(df, label=0, x=2):
@@ -56,17 +57,32 @@ def divide_data(filename, numpy=False, seed=17):
     return train, val, test
 
 
-def kfold_train_test_sets(filename):
+def kfold_train_test_sets(filename, n_splits=10, seed=1):
+    """
+    Splits the given dataset into <n_splits> folds and returns the train and test sets as a list.
+    :param filename: CSV dataset filename.
+    :param n_splits: Number of splits
+    :param seed: seed value for randomness.
+    :return: list of dataframes that correspond to the <n_splits>-fold split.
+    """
     train_sets = []
     test_sets = []
+    val_sets = []
 
     df = pd.read_csv(filename, index_col=0)
     df = df.fillna(0)
-    kf = KFold(n_splits=5, shuffle=True, random_state=1)
-    for train_index, test_index in kf.split(df):
-        train_sets.append(df.iloc[train_index, :])
-        test_sets.append(df.iloc[test_index, :])
-    return train_sets, test_sets
+    X, y = df.iloc[:, :-1], df.iloc[:, -1]
+    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    splits = []
+    for _, test_index in kf.split(X, y):
+        splits.append(df.iloc[test_index, :])
+
+    for i in range(0, n_splits, 2):
+        splits_copy = list(splits)
+        test_sets.append(splits_copy.pop(i))
+        val_sets.append(splits_copy.pop(i))
+        train_sets.append(pd.concat(splits_copy))
+    return train_sets, test_sets, val_sets
 
 
 def condense_c6():
@@ -127,11 +143,10 @@ def plot_roc(tprs, aucs, title='Receiver Operating Characteristic'):
     :param tprs: List of lists of true positive curves.
     :param aucs: List of area under curve values.
     :param title: Title of figure.
-    :return: None.
+    :return: Mean area under curve.
     """
     mean_fpr = np.linspace(0, 1, 100)
-    plt.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
-             label='Chance', alpha=.8)
+    plt.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=.8)
 
     mean_tpr = np.mean(tprs, axis=0)
     mean_tpr[-1] = 1.0
@@ -199,20 +214,8 @@ def plot_confusion_matrix(clf, X_test, y_test, classes, title='Confusion matrix'
     plt.xlabel('Predicted label')
     plt.tight_layout()
 
+
     plt.show()
-
-
-def get_genes(filename):
-    """
-    Returns a list of all the gene symbols in the specified gene set.
-    :param filename: The specified gene set file name.
-    :return: List of gene symbols.
-    """
-    genes = set()
-    with open('gene_sets/' + filename, 'r') as f:
-        for gene in f:
-            genes.add(gene.strip())
-    return list(genes)
 
 
 def plot_roc_from_file(filename, title='Receiver Operating Characteristic'):
@@ -241,6 +244,19 @@ def plot_roc_from_file(filename, title='Receiver Operating Characteristic'):
     plot_roc(tprs, aucs, title)
 
 
+def get_genes(filename):
+    """
+    Returns a list of all the gene symbols in the specified gene set.
+    :param filename: The specified gene set file name.
+    :return: List of gene symbols.
+    """
+    genes = set()
+    with open('gene_sets/' + filename, 'r') as f:
+        for gene in f:
+            genes.add(gene.strip())
+    return list(genes)
+
+
 def split_dataset(filename):
     """
     Split the NeoALTTO dataset by drug (Lapatinib, Trastuzumab, Combo)
@@ -248,9 +264,9 @@ def split_dataset(filename):
     :return: None.
     """
     df = pd.read_csv(filename, index_col=0)
-    df_l = df.loc[(df['Lapatinib'] == 1) & df['Trastuzumab'] == 0]
-    df_t = df.loc[(df['Lapatinib'] == 0) & df['Trastuzumab'] == 1]
-    df_c = df.loc[(df['Lapatinib'] == 1) & df['Trastuzumab'] == 1]
+    df_l = df.loc[(df['Lapatinib'] == 1) & (df['Trastuzumab'] == 0)]
+    df_t = df.loc[(df['Lapatinib'] == 0) & (df['Trastuzumab'] == 1)]
+    df_c = df.loc[(df['Lapatinib'] == 1) & (df['Trastuzumab'] == 1)]
     df_l.to_csv('l_' + filename)
     df_t.to_csv('t_' + filename)
     df_c.to_csv('c_' + filename)
@@ -271,3 +287,85 @@ def get_gene_sets_union(gene_sets_perf, K):
             top_union.add(gene)
     return top_union
 
+
+def avg_auc(train_sets, test_sets, genes):
+    """
+    Finds the average area under curve for an SVM model using only the specified genes as input.
+    :param train_sets: The training sets from 5-fold cross validation.
+    :param test_sets: The testing sets from 5-fold cross_validation.
+    :param genes: List of gene names.
+    :return: Average area under curve from the 5-fold cross validation.
+    """
+    aucs = []
+    for i in range(5):
+        train = train_sets[i]
+        test = test_sets[i]
+        X, y = train[genes], train['responses'].astype(int)
+        X_test, y_test = test[genes], test['responses'].astype(int)
+
+        clf = SVC(gamma='auto', probability=True)
+        probas_ = clf.fit(X, y).predict_proba(X_test)
+        # Compute ROC curve and area the curve
+        fpr, tpr, thresholds = roc_curve(y_test, probas_[:, 1])
+        roc_auc = auc(fpr, tpr)
+        aucs.append(roc_auc)
+    return np.mean(aucs)
+
+
+def gene_set_rankings(filename, out):
+    """
+    Writes a file of the gene set performance (auc), and % time in the top 10 gene sets.
+    :param filename: Input CSV filename.
+    :param out: Name of output file.
+    :return: None.
+    """
+    gene_set_val_auc = defaultdict(float)
+    gene_set_test_auc = defaultdict(float)
+    gene_set_top = defaultdict(int)
+    pathways = sorted(os.listdir('gene_sets'))
+    for r in range(100):
+        print(r)
+        svm_perf = []
+        train_sets, test_sets, val_sets = kfold_train_test_sets(filename, seed=r)
+        for p in pathways:
+            genes = get_genes(p)
+            name = '.'.join(p.split('.')[:-1])
+            mean_val_auc = avg_auc(train_sets, val_sets, genes)
+            mean_test_auc = avg_auc(train_sets, test_sets, genes)
+            svm_perf.append((name, mean_val_auc, mean_test_auc))
+        svm_perf.sort(key=lambda x: x[1], reverse=True)
+        for i in range(len(svm_perf)):
+            name, val_perf, test_perf = svm_perf[i][0], svm_perf[i][1], svm_perf[i][2]
+            if i < 10:
+                gene_set_top[name] += 1
+            gene_set_val_auc[name] += val_perf
+            gene_set_test_auc[name] += test_perf
+
+    with open(out, "w") as f:
+        for gene_set in gene_set_val_auc:
+            f.write("{}\t{}\t{}\t{}\n".format(gene_set, gene_set_val_auc[gene_set], gene_set_test_auc[gene_set], gene_set_top[gene_set]/100.))
+
+
+def cell_line_symbols():
+    mapping = {}
+    with open("../NeoALTTO_ENSG.txt", "r") as f:
+        genes = f.readline().strip().split()
+        symbols = f.readline().strip().split()
+    for i in range(len(genes)):
+        mapping[genes[i]] = symbols[i]
+
+    header = []
+    genes = []
+    with open("../cell_lines_ENSG.txt", "r") as f:
+        for line in f:
+            genes.append(line.strip())
+
+    for gene in genes:
+        if gene in mapping:
+            header.append(mapping[gene])
+        else:
+            header.append("")
+
+    with open("../cell_lines_genes.txt", "w") as f:
+        f.write("\n".join(header))
+    return header
