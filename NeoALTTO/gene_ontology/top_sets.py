@@ -22,7 +22,7 @@ LR = 0.001
 K = 5
 
 
-def make_base_model(n_input, n_hidden, l1, dropout):
+def make_base_model(n_input, n_hidden):
     """
     Creates the keras neural network.
     Architecture: genes -> gene sets -> hidden layer -> output; drugs -> hidden layer -> output
@@ -35,9 +35,8 @@ def make_base_model(n_input, n_hidden, l1, dropout):
         n_hidden,
         activation='relu',
         kernel_initializer='glorot_normal',
-        kernel_regularizer=regularizers.l1(l1) #0.001
+        # kernel_regularizer=regularizers.l1(0.0012) #0.001
         )(inputs)
-    pathways = Dropout(dropout, seed=1)(pathways)
 
     drug_input = Input(shape=(2,), name='drug_input')
     x = keras.layers.concatenate([pathways, drug_input])
@@ -82,28 +81,7 @@ def get_edges(top_sets=None):
     return df.values
 
 
-def get_drugs():
-    df = pd.read_csv("drug_fp.csv", header=None)
-    return df
-
-
-# def drug_to_fp(labels):
-#     drug_dict = {
-#         0: 4,  # lapatinib
-#         1: 4,  # combo
-#         2: 5   # traus
-#     }
-#     fp = None
-#     for l in labels:
-#         drug_idx = drug_dict[l]
-#         if fp is None:
-#             fp = np.array(drug_fp.iloc[drug_idx, :])
-#         else:
-#             fp = np.vstack((fp, np.array(drug_fp.iloc[drug_idx, :])))
-#     return fp
-
-
-def run(dropout, l1):
+def run():
     gene_set_mapping = {}
     with open("gene_set_mapping.txt", "r") as f:
         for line in f:
@@ -114,14 +92,10 @@ def run(dropout, l1):
     tprs = defaultdict(list)
     aucs = defaultdict(list)
     acc = defaultdict(float)
-    top_sets = defaultdict(float)
-    avg_act = defaultdict(float)
     pos = ['c', 'l', 't', 'cl']
     mean_fpr = np.linspace(0, 1, 100)
 
-    t = get_edges()
-
-    for j in range(5):
+    for j in range(1):
         c_train_sets, c_test_sets, c_val_sets = dataset_utils.kfold_train_test_sets('../c_rnaseq_scaled_symbols.csv', seed=j*j)
         l_train_sets, l_test_sets, l_val_sets = dataset_utils.kfold_train_test_sets('../l_rnaseq_scaled_symbols.csv', seed=j*j)
         t_train_sets, t_test_sets, t_val_sets = dataset_utils.kfold_train_test_sets('../t_rnaseq_scaled_symbols.csv', seed=j*j)
@@ -137,6 +111,8 @@ def run(dropout, l1):
         for i in range(5):
             train_sets.append(pd.concat([c_train_sets[i], l_train_sets[i], t_train_sets[i]]))
             val_sets.append(pd.concat([c_val_sets[i], l_val_sets[i], t_val_sets[i]]))
+
+        t = get_edges("noreg_top_sets.txt")
 
         for k in range(5):
             train, val, c_test, l_test, t_test = train_sets[k], val_sets[k], c_test_sets[k], l_test_sets[k], t_test_sets[k]
@@ -154,7 +130,7 @@ def run(dropout, l1):
                 keras.callbacks.EarlyStopping(patience=K, monitor='val_binary_accuracy'),
                 ZeroWeights(t),
             ]
-            model = make_base_model(t.shape[0], t.shape[1], l1, dropout)
+            model = make_base_model(t.shape[0], t.shape[1])
             model.fit({'gene_input': train_data, 'drug_input': train_drug}, train_labels, epochs=EPOCH, batch_size=BATCH_SIZE, callbacks=callbacks, verbose=0,
                       validation_data=([val_data, val_drug], val_labels))
 
@@ -176,25 +152,7 @@ def run(dropout, l1):
                 aucs[pos[i]].append(roc_auc)
                 acc[pos[i]] += accuracy_score(truth, pred)
 
-            w, _ = model.layers[5].get_weights()
-            acts = []
-            for l in range(w.shape[0]-2):
-                activation = sum(map(abs, w[l]))
-                acts.append((l, activation))
-            acts.sort(key=lambda x:-x[1])
-            for l in range(10):
-                gene_set = gene_set_mapping[acts[l][0]]
-                top_sets[gene_set] += 1
-            for g in acts:
-                activation = g[1]
-                gene_set = gene_set_mapping[g[0]]
-                avg_act[gene_set] += activation
-
-    with open("noreg_NN_activations.txt", "w") as f:
-        for gene_set in avg_act:
-            f.write("{}\t{}\t{}\n".format(gene_set, str(avg_act[gene_set]/15.), str(top_sets[gene_set]/15.)))
-
-    with open("noreg_multi_trast_out_NN.txt", "w") as f:
+    with open("noreg_top_multi_trast_out_NN.txt", "w") as f:
         f.write("tprs\n")
         for arr in tprs['t']:
             for val in arr:
@@ -205,7 +163,7 @@ def run(dropout, l1):
             f.write(str(val) + "\t")
         f.write("\n")
 
-    with open("noreg_multi_combo_out_NN.txt", "w") as f:
+    with open("noreg_top_multi_combo_out_NN.txt", "w") as f:
         f.write("tprs\n")
         for arr in tprs['c']:
             for val in arr:
@@ -216,7 +174,7 @@ def run(dropout, l1):
             f.write(str(val) + "\t")
         f.write("\n")
 
-    with open("noreg_multi_lap_out_NN.txt", "w") as f:
+    with open("noreg_top_multi_lap_out_NN.txt", "w") as f:
         f.write("tprs\n")
         for arr in tprs['l']:
             for val in arr:
@@ -227,7 +185,7 @@ def run(dropout, l1):
             f.write(str(val) + "\t")
         f.write("\n")
 
-    with open("noreg_multi_cl_lap_NN.txt", "w") as f:
+    with open("noreg_top_multi_cl_lap_NN.txt", "w") as f:
         f.write("tprs\n")
         for arr in tprs['cl']:
             for val in arr:
@@ -242,5 +200,4 @@ def run(dropout, l1):
         print(pos[i] + " accuracy:")
         print(acc[pos[i]]/15.)
 
-
-run(dropout=0, l1=0)
+run()

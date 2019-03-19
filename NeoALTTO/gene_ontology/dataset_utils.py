@@ -85,6 +85,26 @@ def kfold_train_test_sets(filename, n_splits=10, seed=1):
     return train_sets, test_sets, val_sets
 
 
+def split_train_test_sets(df, n_splits=5, seed=1):
+    """
+    Splits the given dataset into <n_splits> folds and returns the train and test sets as a list.
+    :param df: Dataframe.
+    :param n_splits: Number of splits
+    :param seed: seed value for randomness.
+    :return: list of dataframes that correspond to the <n_splits>-fold split.
+    """
+    train_sets = []
+    test_sets = []
+
+    df = df.fillna(0)
+    X, y = df.iloc[:, :-1], df.iloc[:, -1]
+    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    for train_index, test_index in kf.split(X, y):
+        train_sets.append(df.iloc[train_index, :])
+        test_sets.append(df.iloc[test_index, :])
+    return train_sets, test_sets
+
+
 def condense_c6():
     """
     Condenses the C6 gene sets by combining up-regulated and down-regulated sets into one.
@@ -369,3 +389,22 @@ def cell_line_symbols():
     with open("../cell_lines_genes.txt", "w") as f:
         f.write("\n".join(header))
     return header
+
+
+def top_gene_set_connections(top_set_file, save=False):
+    """
+    Returns an adjacency matrix containing only the specified gene sets.
+    :param top_set_file: File with the name of the top sets.
+    :param save: whether the adjacency matrix should be saved to a file.
+    :return: adjacency matrix of genes to top gene sets.
+    """
+    top_sets = []
+    with open(top_set_file, "r") as f:
+        for line in f:
+            top_sets.append(line.strip())
+
+    df = pd.read_csv("connections_1.csv", index_col=0)
+    df = df.loc[:, top_sets]
+    if save:
+        df.to_csv("top_sets_connections.csv")
+    return df
